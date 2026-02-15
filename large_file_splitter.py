@@ -150,15 +150,10 @@ def scan_directory(root_dir, recover_mode=False, auto_remove=False, verbose=Fals
 
 def main():
     parser = argparse.ArgumentParser(description='Compress and split large files, or recover them.')
-    parser.add_argument('--recover', action='store_true',
-                       help='Recover files from .dir directories')
-    parser.add_argument('--auto-remove', action='store_true',
-                       help='Automatically remove original files after compression and splitting')
-    parser.add_argument('--verbose', action='store_true',
-                       help='Show detailed logging information')
+    parser.add_argument('--recover', action='store_true', help='Recover files from .dir directories')
+    parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
+    parser.add_argument('--verbose', action='store_true', help='Show detailed logging information')
     args = parser.parse_args()
-
-    verbose = args.verbose
 
     current_dir = os.getcwd()
     print(f"Scanning directory: {current_dir}")
@@ -173,11 +168,11 @@ def main():
         if args.auto_remove:
             print("Auto-remove: ENABLED (original files will be deleted after splitting)")
 
-    if verbose:
+    if args.verbose:
         print("Verbose: ENABLED")
 
     print("-" * 60)
-    scan_directory(current_dir, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=verbose)
+    scan_directory(current_dir, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
     print("-" * 60)
     print("Done!")
 
