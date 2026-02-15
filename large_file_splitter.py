@@ -149,10 +149,10 @@ def scan_directory(root_dir, recover_mode=False, auto_remove=False, verbose=Fals
                 print(f"Error processing {item}: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Compress and split large files, or recover them.')
-    parser.add_argument('--recover', action='store_true', help='Recover files from .dir directories')
+    parser = argparse.ArgumentParser(description='Large file splitting/recovery.')
+    parser.add_argument('--verbose', action='store_true', help='Show logging information')
+    parser.add_argument('--recover', action='store_true', help='Recover <file> from <file>.dir directories')
     parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
-    parser.add_argument('--verbose', action='store_true', help='Show detailed logging information')
     args = parser.parse_args()
 
     current_dir = os.getcwd()
@@ -161,7 +161,7 @@ def main():
     if args.recover:
         print("Mode: RECOVER")
         if args.auto_remove:
-            print("Auto-remove: ENABLED (.dir directories will be deleted after recovery)")
+            print("Auto-remove: ENABLED, <file>.dir directories will be deleted after recovery")
     else:
         print(f"Mode: COMPRESS AND SPLIT")
         print(f"Maximum file size: {MAX_SIZE} bytes (1 MByte)")
