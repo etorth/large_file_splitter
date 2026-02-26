@@ -5,7 +5,16 @@ import zipfile
 import shutil
 import argparse
 import stat
+import hashlib
 from pathlib import Path
+
+
+def calculate_md5(file_path):
+    md5_hash = hashlib.md5()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            md5_hash.update(chunk)
+    return md5_hash.hexdigest()
 
 
 def set_file_permissions(file_path, mode):
@@ -61,12 +70,24 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
 
     print(f"Processing {file_path} (size: {file_size} bytes)")
 
+    if verbose:
+        print(f"  Calculating MD5 checksum...")
+    original_md5 = calculate_md5(file_path)
+    if verbose:
+        print(f"  MD5: {original_md5}")
+
     file_mode = get_file_permissions(file_path)
     dir_name = file_path.parent / f"{file_path.name}.dir"
     dir_name.mkdir(exist_ok=True)
 
     if verbose:
         print(f"  Created directory: {dir_name}")
+
+    md5_file = dir_name / f"{file_path.name}.md5"
+    with open(md5_file, 'w') as f:
+        f.write(f"{original_md5}  {file_path.name}\n")
+    if verbose:
+        print(f"  Saved checksum to: {md5_file}")
 
     zip_path = file_path.parent / f"{file_path.name}.zip"
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -98,18 +119,68 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
 
     print(f"Recovering {original_name} from {dir_path}")
 
-    zip_chunks = sorted(dir_path.glob(f"{original_name}.zip.*"),
-                        key=lambda x: int(x.suffix[1:]) if x.suffix[1:].isdigit() else 0)
+    all_chunks = list(dir_path.glob(f"{original_name}.zip.*"))
 
-    if not zip_chunks:
-        print(f"  Warning: No split files found in {dir_path}")
+    if not all_chunks:
+        print(f"  Error: No split files found in {dir_path}")
         return
 
-    chunk_mode = get_file_permissions(zip_chunks[0])
+    valid_chunks = []
+    chunk_numbers = []
+    non_numeric = []
+
+    for chunk in all_chunks:
+        suffix = chunk.suffix[1:]
+        if suffix.isdigit():
+            valid_chunks.append(chunk)
+            chunk_numbers.append(int(suffix))
+        else:
+            non_numeric.append(chunk)
+
+    if not valid_chunks:
+        print(f"  Error: No valid chunk files found (files must end with .zip.0, .zip.1, etc.)")
+        return
+
+    if non_numeric and verbose:
+        print(f"  Warning: Found {len(non_numeric)} non-chunk files in directory (will be ignored)")
+
+    chunk_numbers.sort()
+    valid_chunks.sort(key=lambda x: int(x.suffix[1:]))
+
+    expected_chunks = list(range(len(chunk_numbers)))
+    if chunk_numbers != expected_chunks:
+        print(f"  Error: Missing or non-sequential chunks detected")
+        print(f"    Expected: {expected_chunks}")
+        print(f"    Found:    {chunk_numbers}")
+
+        missing = [i for i in expected_chunks if i not in chunk_numbers]
+        if missing:
+            print(f"    Missing chunks: {missing}")
+
+        unexpected = [i for i in chunk_numbers if i >= len(expected_chunks)]
+        if unexpected:
+            print(f"    Unexpected chunks: {unexpected}")
+
+        print(f"  Cannot recover: chunk sequence is incomplete or corrupted")
+        return
+
+    if chunk_numbers[0] != 0:
+        print(f"  Error: First chunk should be .0, but found .{chunk_numbers[0]}")
+        return
+
+    expected_last = len(chunk_numbers) - 1
+    if chunk_numbers[-1] != expected_last:
+        print(f"  Error: Last chunk should be .{expected_last}, but found .{chunk_numbers[-1]}")
+        return
+
+    if verbose:
+        print(f"  Validated {len(valid_chunks)} chunks (sequential from 0 to {expected_last})")
+
+    chunk_mode = get_file_permissions(valid_chunks[0])
     zip_path = dir_path.parent / f"{original_name}.zip"
 
     with open(zip_path, 'wb') as outf:
-        for chunk in zip_chunks:
+        for chunk in valid_chunks:
             if verbose:
                 print(f"  Concatenating {chunk.name}")
             with open(chunk, 'rb') as inf:
@@ -127,6 +198,31 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
     if verbose:
         print(f"  Restored permissions: {oct(chunk_mode)}")
 
+    md5_file = dir_path / f"{original_name}.md5"
+    if md5_file.exists():
+        try:
+            with open(md5_file, 'r') as f:
+                md5_line = f.read().strip()
+                expected_md5 = md5_line.split()[0]
+
+            if verbose:
+                print(f"  Verifying MD5 checksum...")
+
+            actual_md5 = calculate_md5(original_path)
+
+            if actual_md5 == expected_md5:
+                print(f"  ✓ MD5 verification passed: {actual_md5}")
+            else:
+                print(f"  ✗ MD5 verification FAILED!")
+                print(f"    Expected: {expected_md5}")
+                print(f"    Actual:   {actual_md5}")
+                print(f"  WARNING: Recovered file may be corrupted!")
+        except Exception as e:
+            print(f"  Warning: Could not verify MD5 checksum: {e}")
+    else:
+        if verbose:
+            print(f"  Note: No MD5 checksum file found (older split or missing file)")
+
     zip_path.unlink()
     if verbose:
         print(f"  Removed temporary zip: {zip_path}")
@@ -138,6 +234,7 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
 
 
 def check_for_symlinks(root_dir, verbose=False):
+    """Check if there are any symlinks in the directory"""
     root_path = Path(root_dir)
 
     for item in root_path.rglob('*'):
@@ -150,6 +247,31 @@ def check_for_symlinks(root_dir, verbose=False):
             return True, item
 
     return False, None
+
+
+def check_for_conflicts(root_dir, verbose=False):
+    """Check for files that already have corresponding .dir directories"""
+    root_path = Path(root_dir)
+    conflicts = []
+
+    for item in root_path.rglob('*'):
+        if item.is_dir():
+            continue
+
+        if any(part.endswith('.dir') for part in item.parts):
+            continue
+
+        if any(part.endswith('.git') for part in item.parts):
+            continue
+
+        if item.name == 'large_file_splitter.py':
+            continue
+
+        dir_name = item.parent / f"{item.name}.dir"
+        if dir_name.exists() and dir_name.is_dir():
+            conflicts.append((item, dir_name))
+
+    return conflicts
 
 
 def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
@@ -167,6 +289,17 @@ def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, ve
         if has_symlinks:
             print(f"Error: Found symlink {first_symlink}. Symlinks are not supported.")
             print("Please remove all symlinks before running this tool.")
+            sys.exit(1)
+
+        conflicts = check_for_conflicts(root_dir, verbose=verbose)
+        if conflicts:
+            print(f"Error: Found {len(conflicts)} file(s) with existing .dir directories:")
+            for file_path, dir_path in conflicts[:5]:
+                print(f"  - {file_path} (has {dir_path})")
+            if len(conflicts) > 5:
+                print(f"  ... and {len(conflicts) - 5} more")
+            print("\nPlease remove the .dir directories or the files before running.")
+            print("This prevents accidental overwrites and data corruption.")
             sys.exit(1)
 
         for item in root_path.rglob('*'):
