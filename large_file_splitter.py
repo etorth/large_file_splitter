@@ -8,13 +8,19 @@ import argparse
 
 
 def split_file(zip_path, output_dir, max_chunk_size, verbose=False):
-    chunk_num = 1
+    file_size = zip_path.stat().st_size
+
+    total_chunks = (file_size + max_chunk_size - 1) // max_chunk_size
+    padding_width = len(str(total_chunks - 1))
+
+    chunk_num = 0
     with open(zip_path, 'rb') as f:
         while True:
             chunk = f.read(max_chunk_size)
             if not chunk:
                 break
-            chunk_path = output_dir / f"{zip_path.name}.{chunk_num}"
+            chunk_suffix = str(chunk_num).zfill(padding_width)
+            chunk_path = output_dir / f"{zip_path.name}.{chunk_suffix}"
             with open(chunk_path, 'wb') as chunk_file:
                 chunk_file.write(chunk)
             if verbose:
@@ -34,12 +40,14 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
 
     dir_name = file_path.parent / f"{file_path.name}.dir"
     dir_name.mkdir(exist_ok=True)
+
     if verbose:
         print(f"  Created directory: {dir_name}")
 
     zip_path = file_path.parent / f"{file_path.name}.zip"
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(file_path, file_path.name)
+
     if verbose:
         print(f"  Compressed to: {zip_path} ({zip_path.stat().st_size} bytes)")
 
@@ -66,7 +74,8 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
 
     print(f"Recovering {original_name} from {dir_path}")
 
-    zip_chunks = sorted(dir_path.glob(f"{original_name}.zip.*"), key=lambda x: int(x.suffix[1:]))
+    zip_chunks = sorted(dir_path.glob(f"{original_name}.zip.*"),
+                        key=lambda x: int(x.suffix[1:]) if x.suffix[1:].isdigit() else 0)
 
     if not zip_chunks:
         print(f"  Warning: No split files found in {dir_path}")
