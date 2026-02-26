@@ -107,6 +107,22 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
             print(f"  Removed directory: {dir_path}")
 
 
+def check_for_symlinks(root_dir, verbose=False):
+    """Check if there are any symlinks in the directory. Returns True if symlinks found."""
+    root_path = Path(root_dir)
+
+    for item in root_path.rglob('*'):
+        if any(part.endswith('.dir') for part in item.parts):
+            continue
+        if any(part.endswith('.git') for part in item.parts):
+            continue
+
+        if item.is_symlink():
+            return True, item
+
+    return False, None
+
+
 def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
     root_path = Path(root_dir)
 
@@ -118,6 +134,12 @@ def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, ve
                 except Exception as e:
                     print(f"Error recovering from {item}: {e}")
     else:
+        has_symlinks, first_symlink = check_for_symlinks(root_dir, verbose=verbose)
+        if has_symlinks:
+            print(f"Error: Found symlink {first_symlink}. Symlinks are not supported.")
+            print("Please remove all symlinks before running this tool.")
+            sys.exit(1)
+
         for item in root_path.rglob('*'):
             if item.is_dir():
                 continue
