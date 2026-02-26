@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 import argparse
 
+
 def split_file(zip_path, output_dir, max_chunk_size, verbose=False):
     """Split a zip file into chunks smaller than max_chunk_size"""
     chunk_num = 1
@@ -20,6 +21,7 @@ def split_file(zip_path, output_dir, max_chunk_size, verbose=False):
             if verbose:
                 print(f"  Created chunk: {chunk_path} ({len(chunk)} bytes)")
             chunk_num += 1
+
 
 def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
     """Compress a file and split it if necessary"""
@@ -58,6 +60,7 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
         file_path.unlink()
         if verbose:
             print(f"  Removed original file: {file_path}")
+
 
 def recover_file(dir_path, auto_remove=False, verbose=False):
     """Recover a file from its .dir directory"""
@@ -109,6 +112,7 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
         if verbose:
             print(f"  Removed directory: {dir_path}")
 
+
 def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
     """Recursively scan directory and process files"""
     root_path = Path(root_dir)
@@ -144,6 +148,7 @@ def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, ve
                 compress_and_split(item, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
             except Exception as e:
                 print(f"Error processing {item}: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(description='Large file splitting/recovery.')
@@ -182,6 +187,7 @@ def main():
     scan_directory(current_dir, max_size=args.max_size, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
     print("-" * 60)
     print("Done!")
+
 
 if __name__ == "__main__":
     main()
