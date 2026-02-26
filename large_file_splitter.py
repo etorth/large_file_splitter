@@ -6,10 +6,7 @@ import shutil
 from pathlib import Path
 import argparse
 
-MAX_SIZE = 1024 * 1024  # 1 MByte
-CHUNK_SIZE = 1024 * 1024  # 1 MByte for split files
-
-def split_file(zip_path, output_dir, max_chunk_size=CHUNK_SIZE, verbose=False):
+def split_file(zip_path, output_dir, max_chunk_size, verbose=False):
     """Split a zip file into chunks smaller than max_chunk_size"""
     chunk_num = 1
     with open(zip_path, 'rb') as f:
@@ -24,13 +21,13 @@ def split_file(zip_path, output_dir, max_chunk_size=CHUNK_SIZE, verbose=False):
                 print(f"  Created chunk: {chunk_path} ({len(chunk)} bytes)")
             chunk_num += 1
 
-def compress_and_split(file_path, auto_remove=False, verbose=False):
+def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
     """Compress a file and split it if necessary"""
     file_size = file_path.stat().st_size
 
-    if file_size <= MAX_SIZE:
+    if file_size <= max_size:
         if verbose:
-            print(f"Skipping {file_path} (size: {file_size} bytes <= 1MB)")
+            print(f"Skipping {file_path} (size: {file_size} bytes <= {max_size} bytes)")
         return
 
     print(f"Processing {file_path} (size: {file_size} bytes)")
@@ -49,7 +46,7 @@ def compress_and_split(file_path, auto_remove=False, verbose=False):
         print(f"  Compressed to: {zip_path} ({zip_path.stat().st_size} bytes)")
 
     # Split zip file into chunks
-    split_file(zip_path, dir_name, verbose=verbose)
+    split_file(zip_path, dir_name, max_chunk_size=max_size, verbose=verbose)
 
     # Remove the temporary zip file
     zip_path.unlink()
@@ -112,7 +109,7 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
         if verbose:
             print(f"  Removed directory: {dir_path}")
 
-def scan_directory(root_dir, recover_mode=False, auto_remove=False, verbose=False):
+def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
     """Recursively scan directory and process files"""
     root_path = Path(root_dir)
 
@@ -144,7 +141,7 @@ def scan_directory(root_dir, recover_mode=False, auto_remove=False, verbose=Fals
                 continue
 
             try:
-                compress_and_split(item, auto_remove=auto_remove, verbose=verbose)
+                compress_and_split(item, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
             except Exception as e:
                 print(f"Error processing {item}: {e}")
 
@@ -153,7 +150,17 @@ def main():
     parser.add_argument('--verbose', action='store_true', help='Show logging information')
     parser.add_argument('--recover', action='store_true', help='Recover <file> from <file>.dir directories')
     parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
+    parser.add_argument('--max-size', type=int, required=True, help='Maximum chunk size in bytes (must be positive)')
     args = parser.parse_args()
+
+    # Validate max-size
+    if args.max_size <= 0:
+        print("Error: --max-size must be a positive number")
+        sys.exit(1)
+
+    # Warn if chunk size is small
+    if args.max_size < 1024:
+        print(f"Warning: file chunk is small: {args.max_size}")
 
     current_dir = os.getcwd()
     print(f"Scanning directory: {current_dir}")
@@ -164,7 +171,7 @@ def main():
             print("Auto-remove: ENABLED, <file>.dir directories will be deleted after recovery")
     else:
         print(f"Mode: COMPRESS AND SPLIT")
-        print(f"Maximum file size: {MAX_SIZE} bytes (1 MByte)")
+        print(f"Maximum file size: {args.max_size} bytes")
         if args.auto_remove:
             print("Auto-remove: ENABLED (original files will be deleted after splitting)")
 
@@ -172,7 +179,7 @@ def main():
         print("Verbose: ENABLED")
 
     print("-" * 60)
-    scan_directory(current_dir, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
+    scan_directory(current_dir, max_size=args.max_size, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
     print("-" * 60)
     print("Done!")
 
