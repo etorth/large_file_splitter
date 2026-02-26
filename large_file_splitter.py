@@ -3,11 +3,32 @@ import os
 import sys
 import zipfile
 import shutil
-from pathlib import Path
 import argparse
+import stat
+from pathlib import Path
 
 
-def split_file(zip_path, output_dir, max_chunk_size, verbose=False):
+def set_file_permissions(file_path, mode):
+    try:
+        if sys.platform == 'win32':
+            if not (mode & stat.S_IWUSR):
+                file_path.chmod(stat.S_IREAD)
+            else:
+                file_path.chmod(stat.S_IREAD | stat.S_IWRITE)
+        else:
+            file_path.chmod(mode)
+    except Exception as e:
+        pass
+
+
+def get_file_permissions(file_path):
+    try:
+        return file_path.stat().st_mode
+    except Exception:
+        return stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+
+
+def split_file(zip_path, output_dir, max_chunk_size, file_mode, verbose=False):
     file_size = zip_path.stat().st_size
 
     total_chunks = (file_size + max_chunk_size - 1) // max_chunk_size
@@ -23,6 +44,8 @@ def split_file(zip_path, output_dir, max_chunk_size, verbose=False):
             chunk_path = output_dir / f"{zip_path.name}.{chunk_suffix}"
             with open(chunk_path, 'wb') as chunk_file:
                 chunk_file.write(chunk)
+
+            set_file_permissions(chunk_path, file_mode)
             if verbose:
                 print(f"  Created chunk: {chunk_path} ({len(chunk)} bytes)")
             chunk_num += 1
@@ -38,6 +61,7 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
 
     print(f"Processing {file_path} (size: {file_size} bytes)")
 
+    file_mode = get_file_permissions(file_path)
     dir_name = file_path.parent / f"{file_path.name}.dir"
     dir_name.mkdir(exist_ok=True)
 
@@ -51,7 +75,7 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
     if verbose:
         print(f"  Compressed to: {zip_path} ({zip_path.stat().st_size} bytes)")
 
-    split_file(zip_path, dir_name, max_chunk_size=max_size, verbose=verbose)
+    split_file(zip_path, dir_name, max_chunk_size=max_size, file_mode=file_mode, verbose=verbose)
 
     zip_path.unlink()
     if verbose:
@@ -81,7 +105,9 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
         print(f"  Warning: No split files found in {dir_path}")
         return
 
+    chunk_mode = get_file_permissions(zip_chunks[0])
     zip_path = dir_path.parent / f"{original_name}.zip"
+
     with open(zip_path, 'wb') as outf:
         for chunk in zip_chunks:
             if verbose:
@@ -97,6 +123,10 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
     if verbose:
         print(f"  Extracted to: {original_path}")
 
+    set_file_permissions(original_path, chunk_mode)
+    if verbose:
+        print(f"  Restored permissions: {oct(chunk_mode)}")
+
     zip_path.unlink()
     if verbose:
         print(f"  Removed temporary zip: {zip_path}")
@@ -108,7 +138,6 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
 
 
 def check_for_symlinks(root_dir, verbose=False):
-    """Check if there are any symlinks in the directory. Returns True if symlinks found."""
     root_path = Path(root_dir)
 
     for item in root_path.rglob('*'):
