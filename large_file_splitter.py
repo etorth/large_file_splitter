@@ -108,7 +108,7 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
             print(f"  Removed original file: {file_path}")
 
 
-def recover_file(dir_path, auto_remove=False, verbose=False):
+def recover_file(dir_path, max_size=None, auto_remove=False, verbose=False):
     dir_name = dir_path.name
 
     if not dir_name.endswith('.dir'):
@@ -175,6 +175,24 @@ def recover_file(dir_path, auto_remove=False, verbose=False):
 
     if verbose:
         print(f"  Validated {len(valid_chunks)} chunks (sequential from 0 to {expected_last})")
+
+    if max_size is not None:
+        oversized_chunks = []
+        for chunk in valid_chunks:
+            chunk_size = chunk.stat().st_size
+            if chunk_size > max_size:
+                oversized_chunks.append((chunk.name, chunk_size))
+
+        if oversized_chunks:
+            print(f"  Error: Found {len(oversized_chunks)} chunk(s) larger than max-size ({max_size} bytes):")
+            for chunk_name, size in oversized_chunks[:5]:
+                print(f"    - {chunk_name}: {size} bytes (exceeds limit by {size - max_size} bytes)")
+            if len(oversized_chunks) > 5:
+                print(f"    ... and {len(oversized_chunks) - 5} more")
+            print(f"  Cannot recover: chunk sizes are invalid")
+            return
+        elif verbose:
+            print(f"  All chunks are within size limit ({max_size} bytes)")
 
     chunk_mode = get_file_permissions(valid_chunks[0])
     zip_path = dir_path.parent / f"{original_name}.zip"
@@ -281,7 +299,7 @@ def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, ve
         for item in root_path.rglob('*.dir'):
             if item.is_dir():
                 try:
-                    recover_file(item, auto_remove=auto_remove, verbose=verbose)
+                    recover_file(item, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
                 except Exception as e:
                     print(f"Error recovering from {item}: {e}")
     else:
@@ -329,15 +347,21 @@ def main():
     parser.add_argument('--verbose', action='store_true', help='Show logging information')
     parser.add_argument('--recover', action='store_true', help='Recover <file> from <file>.dir directories')
     parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
-    parser.add_argument('--max-size', type=int, required=True, help='Maximum chunk size in bytes (must be positive)')
+    parser.add_argument('--max-size', type=int, help='Maximum chunk size in bytes (required for split mode, ignored in recovery mode)')
     args = parser.parse_args()
 
-    if args.max_size <= 0:
-        print("Error: --max-size must be a positive number")
-        sys.exit(1)
+    if not args.recover:
+        if args.max_size is None:
+            print("Error: --max-size is required for split mode")
+            print("Usage: --max-size <bytes>")
+            sys.exit(1)
 
-    if args.max_size < 1024:
-        print(f"Warning: file chunk is small: {args.max_size}")
+        if args.max_size <= 0:
+            print("Error: --max-size must be a positive number")
+            sys.exit(1)
+
+        if args.max_size < 1024:
+            print(f"Warning: file chunk is small: {args.max_size}")
 
     current_dir = os.getcwd()
     print(f"Scanning directory: {current_dir}")
