@@ -64,8 +64,16 @@ def compress_and_split(file_path, output_path, max_size, auto_remove=False, verb
     file_size = file_path.stat().st_size
 
     if file_size <= max_size:
+        print(f"Copying {file_path} (size: {file_size} bytes <= {max_size} bytes)")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, output_path)
         if verbose:
-            print(f"Skipping {file_path} (size: {file_size} bytes <= {max_size} bytes)")
+            print(f"  Copied to: {output_path}")
+
+        if auto_remove:
+            file_path.unlink()
+            if verbose:
+                print(f"  Removed original file: {file_path}")
         return
 
     print(f"Processing {file_path} (size: {file_size} bytes)")
@@ -308,6 +316,26 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
                     recover_file(item, output_file, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
                 except Exception as e:
                     print(f"Error recovering from {item}: {e}")
+
+        for item in input_path.rglob('*'):
+            if item.is_dir():
+                continue
+
+            if any(part.endswith('.dir') for part in item.parts):
+                continue
+
+            if any(part.endswith('.git') for part in item.parts):
+                continue
+
+            try:
+                rel_path = item.relative_to(input_path)
+                output_file = output_path / rel_path
+                output_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, output_file)
+                if verbose:
+                    print(f"Copying {item} to {output_file}")
+            except Exception as e:
+                print(f"Error copying {item}: {e}")
     else:
         has_symlinks, first_symlink = check_for_symlinks(input_dir, verbose=verbose)
         if has_symlinks:
