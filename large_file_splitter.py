@@ -60,7 +60,7 @@ def split_file(zip_path, output_dir, max_chunk_size, file_mode, verbose=False):
             chunk_num += 1
 
 
-def compress_and_split(file_path, output_path, max_size, auto_remove=False, verbose=False):
+def compress_and_split(file_path, output_path, max_size, split_suffix='dir', auto_remove=False, verbose=False):
     file_size = file_path.stat().st_size
 
     if file_size <= max_size:
@@ -87,7 +87,7 @@ def compress_and_split(file_path, output_path, max_size, auto_remove=False, verb
     file_mode = get_file_permissions(file_path)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    dir_name = output_path.parent / f"{output_path.name}.dir"
+    dir_name = output_path.parent / f"{output_path.name}.{split_suffix}"
     dir_name.mkdir(exist_ok=True)
 
     if verbose:
@@ -118,13 +118,14 @@ def compress_and_split(file_path, output_path, max_size, auto_remove=False, verb
             print(f"  Removed original file: {file_path}")
 
 
-def recover_file(dir_path, output_path, max_size=None, auto_remove=False, verbose=False):
+def recover_file(dir_path, output_path, split_suffix, max_size=None, auto_remove=False, verbose=False):
     dir_name = dir_path.name
 
-    if not dir_name.endswith('.dir'):
+    expected_suffix = f'.{split_suffix}'
+    if not dir_name.endswith(expected_suffix):
         return
 
-    original_name = dir_name[:-4]
+    original_name = dir_name[:-len(expected_suffix)]
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Recovering {original_name} from {dir_path}")
@@ -277,8 +278,8 @@ def check_for_symlinks(root_dir, verbose=False):
     return False, None
 
 
-def check_for_conflicts(root_dir, verbose=False):
-    """Check for files that already have corresponding .dir directories"""
+def check_for_conflicts(root_dir, split_suffix='dir', verbose=False):
+    """Check for files that already have corresponding split directories"""
     root_path = Path(root_dir)
     conflicts = []
 
@@ -286,7 +287,7 @@ def check_for_conflicts(root_dir, verbose=False):
         if item.is_dir():
             continue
 
-        if any(part.endswith('.dir') for part in item.parts):
+        if any(part.endswith(f'.{split_suffix}') for part in item.parts):
             continue
 
         if any(part.endswith('.git') for part in item.parts):
@@ -295,14 +296,14 @@ def check_for_conflicts(root_dir, verbose=False):
         if item.name == 'large_file_splitter.py':
             continue
 
-        dir_name = item.parent / f"{item.name}.dir"
+        dir_name = item.parent / f"{item.name}.{split_suffix}"
         if dir_name.exists() and dir_name.is_dir():
             conflicts.append((item, dir_name))
 
     return conflicts
 
 
-def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
+def scan_directory(input_dir, output_dir, max_size, split_suffix='dir', recover_mode=False, auto_remove=False, verbose=False):
     input_path = Path(input_dir)
     output_path = Path(output_dir)
 
@@ -311,13 +312,13 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
 
     for item in input_path.rglob('*'):
         if item.is_dir():
-            if recover_mode and item.name.endswith('.dir'):
+            if recover_mode and item.name.endswith(f'.{split_suffix}'):
                 continue
 
             if any(part.endswith('.git') for part in item.parts):
                 continue
 
-            if any(part.endswith('.dir') for part in item.parts):
+            if any(part.endswith(f'.{split_suffix}') for part in item.parts):
                 continue
 
             rel_path = item.relative_to(input_path)
@@ -327,13 +328,13 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
                 print(f"  Created directory: {output_dir_path}")
 
     if recover_mode:
-        for item in input_path.rglob('*.dir'):
+        for item in input_path.rglob(f'*.{split_suffix}'):
             if item.is_dir():
                 try:
                     rel_path = item.relative_to(input_path)
-                    original_name = item.name[:-4]
+                    original_name = item.name[:-len(f'.{split_suffix}')]
                     output_file = output_path / rel_path.parent / original_name
-                    recover_file(item, output_file, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
+                    recover_file(item, output_file, split_suffix, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
                 except Exception as e:
                     print(f"Error recovering from {item}: {e}")
 
@@ -341,7 +342,7 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
             if item.is_dir():
                 continue
 
-            if any(part.endswith('.dir') for part in item.parts):
+            if any(part.endswith(f'.{split_suffix}') for part in item.parts):
                 continue
 
             if any(part.endswith('.git') for part in item.parts):
@@ -363,14 +364,14 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
             print("Please remove all symlinks before running this tool.")
             sys.exit(1)
 
-        conflicts = check_for_conflicts(input_dir, verbose=verbose)
+        conflicts = check_for_conflicts(input_dir, split_suffix=split_suffix, verbose=verbose)
         if conflicts:
-            print(f"Error: Found {len(conflicts)} file(s) with existing .dir directories:")
+            print(f"Error: Found {len(conflicts)} file(s) with existing .{split_suffix} directories:")
             for file_path, dir_path in conflicts[:5]:
                 print(f"  - {file_path} (has {dir_path})")
             if len(conflicts) > 5:
                 print(f"  ... and {len(conflicts) - 5} more")
-            print("\nPlease remove the .dir directories or the files before running.")
+            print(f"\nPlease remove the .{split_suffix} directories or the files before running.")
             print("This prevents accidental overwrites and data corruption.")
             sys.exit(1)
 
@@ -378,7 +379,7 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
             if item.is_dir():
                 continue
 
-            if any(part.endswith('.dir') for part in item.parts):
+            if any(part.endswith(f'.{split_suffix}') for part in item.parts):
                 continue
 
             if any(part.endswith('.git') for part in item.parts):
@@ -393,7 +394,7 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
             try:
                 rel_path = item.relative_to(input_path)
                 output_file = output_path / rel_path
-                compress_and_split(item, output_file, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
+                compress_and_split(item, output_file, max_size=max_size, split_suffix=split_suffix, auto_remove=auto_remove, verbose=verbose)
             except Exception as e:
                 print(f"Error processing {item}: {e}")
 
@@ -402,8 +403,9 @@ def main():
     parser = argparse.ArgumentParser(description='Large file splitting/recovery.')
     parser.add_argument('--input-dir', required=True, help='Input directory to process')
     parser.add_argument('--output-dir', required=True, help='Output directory for results')
+    parser.add_argument('--split-dir-suffix', default='dir', help='Suffix for split directories (default: "dir", creates filename.dir)')
     parser.add_argument('--verbose', action='store_true', help='Show logging information')
-    parser.add_argument('--recover', action='store_true', help='Recover <file> from <file>.dir directories')
+    parser.add_argument('--recover', action='store_true', help='Recover files from split directories')
     parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
     parser.add_argument('--max-size', type=int, help='Maximum chunk size in bytes (required for split mode, optional for recovery mode)')
     args = parser.parse_args()
@@ -437,11 +439,12 @@ def main():
 
     print(f"Input directory: {input_path.absolute()}")
     print(f"Output directory: {output_path.absolute()}")
+    print(f"Split directory suffix: .{args.split_dir_suffix}")
 
     if args.recover:
         print("Mode: RECOVER")
         if args.auto_remove:
-            print("Auto-remove: ENABLED, <file>.dir directories will be deleted after recovery")
+            print(f"Auto-remove: ENABLED, .{args.split_dir_suffix} directories will be deleted after recovery")
     else:
         print(f"Mode: COMPRESS AND SPLIT")
         print(f"Maximum file size: {args.max_size} bytes")
@@ -452,7 +455,7 @@ def main():
         print("Verbose: ENABLED")
 
     print("-" * 60)
-    scan_directory(args.input_dir, args.output_dir, max_size=args.max_size, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
+    scan_directory(args.input_dir, args.output_dir, max_size=args.max_size, split_suffix=args.split_dir_suffix, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
     print("-" * 60)
     print("Done!")
 
