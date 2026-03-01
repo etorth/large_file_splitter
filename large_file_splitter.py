@@ -60,7 +60,7 @@ def split_file(zip_path, output_dir, max_chunk_size, file_mode, verbose=False):
             chunk_num += 1
 
 
-def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
+def compress_and_split(file_path, output_path, max_size, auto_remove=False, verbose=False):
     file_size = file_path.stat().st_size
 
     if file_size <= max_size:
@@ -77,21 +77,23 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
         print(f"  MD5: {original_md5}")
 
     file_mode = get_file_permissions(file_path)
-    dir_name = file_path.parent / f"{file_path.name}.dir"
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    dir_name = output_path.parent / f"{output_path.name}.dir"
     dir_name.mkdir(exist_ok=True)
 
     if verbose:
         print(f"  Created directory: {dir_name}")
 
-    md5_file = dir_name / f"{file_path.name}.md5"
+    md5_file = dir_name / f"{output_path.name}.md5"
     with open(md5_file, 'w') as f:
-        f.write(f"{original_md5}  {file_path.name}\n")
+        f.write(f"{original_md5}  {output_path.name}\n")
     if verbose:
         print(f"  Saved checksum to: {md5_file}")
 
-    zip_path = file_path.parent / f"{file_path.name}.zip"
+    zip_path = output_path.parent / f"{output_path.name}.zip"
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(file_path, file_path.name)
+        zipf.write(file_path, output_path.name)
 
     if verbose:
         print(f"  Compressed to: {zip_path} ({zip_path.stat().st_size} bytes)")
@@ -108,14 +110,14 @@ def compress_and_split(file_path, max_size, auto_remove=False, verbose=False):
             print(f"  Removed original file: {file_path}")
 
 
-def recover_file(dir_path, max_size=None, auto_remove=False, verbose=False):
+def recover_file(dir_path, output_path, max_size=None, auto_remove=False, verbose=False):
     dir_name = dir_path.name
 
     if not dir_name.endswith('.dir'):
         return
 
     original_name = dir_name[:-4]
-    original_path = dir_path.parent / original_name
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Recovering {original_name} from {dir_path}")
 
@@ -195,7 +197,7 @@ def recover_file(dir_path, max_size=None, auto_remove=False, verbose=False):
             print(f"  All chunks are within size limit ({max_size} bytes)")
 
     chunk_mode = get_file_permissions(valid_chunks[0])
-    zip_path = dir_path.parent / f"{original_name}.zip"
+    zip_path = output_path.parent / f"{output_path.name}.zip"
 
     with open(zip_path, 'wb') as outf:
         for chunk in valid_chunks:
@@ -208,11 +210,11 @@ def recover_file(dir_path, max_size=None, auto_remove=False, verbose=False):
         print(f"  Created: {zip_path} ({zip_path.stat().st_size} bytes)")
 
     with zipfile.ZipFile(zip_path, 'r') as zipf:
-        zipf.extractall(dir_path.parent)
+        zipf.extractall(output_path.parent)
     if verbose:
-        print(f"  Extracted to: {original_path}")
+        print(f"  Extracted to: {output_path}")
 
-    set_file_permissions(original_path, chunk_mode)
+    set_file_permissions(output_path, chunk_mode)
     if verbose:
         print(f"  Restored permissions: {oct(chunk_mode)}")
 
@@ -226,7 +228,7 @@ def recover_file(dir_path, max_size=None, auto_remove=False, verbose=False):
             if verbose:
                 print(f"  Verifying MD5 checksum...")
 
-            actual_md5 = calculate_md5(original_path)
+            actual_md5 = calculate_md5(output_path)
 
             if actual_md5 == expected_md5:
                 print(f"  ✓ MD5 verification passed: {actual_md5}")
@@ -292,24 +294,28 @@ def check_for_conflicts(root_dir, verbose=False):
     return conflicts
 
 
-def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
-    root_path = Path(root_dir)
+def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_remove=False, verbose=False):
+    input_path = Path(input_dir)
+    output_path = Path(output_dir)
 
     if recover_mode:
-        for item in root_path.rglob('*.dir'):
+        for item in input_path.rglob('*.dir'):
             if item.is_dir():
                 try:
-                    recover_file(item, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
+                    rel_path = item.relative_to(input_path)
+                    original_name = item.name[:-4]
+                    output_file = output_path / rel_path.parent / original_name
+                    recover_file(item, output_file, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
                 except Exception as e:
                     print(f"Error recovering from {item}: {e}")
     else:
-        has_symlinks, first_symlink = check_for_symlinks(root_dir, verbose=verbose)
+        has_symlinks, first_symlink = check_for_symlinks(input_dir, verbose=verbose)
         if has_symlinks:
             print(f"Error: Found symlink {first_symlink}. Symlinks are not supported.")
             print("Please remove all symlinks before running this tool.")
             sys.exit(1)
 
-        conflicts = check_for_conflicts(root_dir, verbose=verbose)
+        conflicts = check_for_conflicts(input_dir, verbose=verbose)
         if conflicts:
             print(f"Error: Found {len(conflicts)} file(s) with existing .dir directories:")
             for file_path, dir_path in conflicts[:5]:
@@ -320,7 +326,7 @@ def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, ve
             print("This prevents accidental overwrites and data corruption.")
             sys.exit(1)
 
-        for item in root_path.rglob('*'):
+        for item in input_path.rglob('*'):
             if item.is_dir():
                 continue
 
@@ -337,18 +343,36 @@ def scan_directory(root_dir, max_size, recover_mode=False, auto_remove=False, ve
                 continue
 
             try:
-                compress_and_split(item, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
+                rel_path = item.relative_to(input_path)
+                output_file = output_path / rel_path
+                compress_and_split(item, output_file, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
             except Exception as e:
                 print(f"Error processing {item}: {e}")
 
 
 def main():
     parser = argparse.ArgumentParser(description='Large file splitting/recovery.')
+    parser.add_argument('--input-dir', required=True, help='Input directory to process')
+    parser.add_argument('--output-dir', required=True, help='Output directory for results')
     parser.add_argument('--verbose', action='store_true', help='Show logging information')
     parser.add_argument('--recover', action='store_true', help='Recover <file> from <file>.dir directories')
     parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
-    parser.add_argument('--max-size', type=int, help='Maximum chunk size in bytes (required for split mode, ignored in recovery mode)')
+    parser.add_argument('--max-size', type=int, help='Maximum chunk size in bytes (required for split mode, optional for recovery mode)')
     args = parser.parse_args()
+
+    input_path = Path(args.input_dir)
+    if not input_path.exists():
+        print(f"Error: Input directory does not exist: {args.input_dir}")
+        sys.exit(1)
+    if not input_path.is_dir():
+        print(f"Error: Input path is not a directory: {args.input_dir}")
+        sys.exit(1)
+
+    output_path = Path(args.output_dir)
+    if output_path.exists():
+        print(f"Error: Output directory already exists: {args.output_dir}")
+        print("Please remove it or choose a different output directory.")
+        sys.exit(1)
 
     if not args.recover:
         if args.max_size is None:
@@ -363,8 +387,8 @@ def main():
         if args.max_size < 1024:
             print(f"Warning: file chunk is small: {args.max_size}")
 
-    current_dir = os.getcwd()
-    print(f"Scanning directory: {current_dir}")
+    print(f"Input directory: {input_path.absolute()}")
+    print(f"Output directory: {output_path.absolute()}")
 
     if args.recover:
         print("Mode: RECOVER")
@@ -380,7 +404,7 @@ def main():
         print("Verbose: ENABLED")
 
     print("-" * 60)
-    scan_directory(current_dir, max_size=args.max_size, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
+    scan_directory(args.input_dir, args.output_dir, max_size=args.max_size, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
     print("-" * 60)
     print("Done!")
 
