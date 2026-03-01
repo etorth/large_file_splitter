@@ -306,6 +306,26 @@ def scan_directory(input_dir, output_dir, max_size, recover_mode=False, auto_rem
     input_path = Path(input_dir)
     output_path = Path(output_dir)
 
+    if verbose:
+        print("Creating directory structure...")
+
+    for item in input_path.rglob('*'):
+        if item.is_dir():
+            if recover_mode and item.name.endswith('.dir'):
+                continue
+
+            if any(part.endswith('.git') for part in item.parts):
+                continue
+
+            if any(part.endswith('.dir') for part in item.parts):
+                continue
+
+            rel_path = item.relative_to(input_path)
+            output_dir_path = output_path / rel_path
+            output_dir_path.mkdir(parents=True, exist_ok=True)
+            if verbose:
+                print(f"  Created directory: {output_dir_path}")
+
     if recover_mode:
         for item in input_path.rglob('*.dir'):
             if item.is_dir():
