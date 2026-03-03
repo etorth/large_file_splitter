@@ -60,7 +60,7 @@ def split_file(zip_path, output_dir, max_chunk_size, file_mode, verbose=False):
             chunk_num += 1
 
 
-def compress_and_split(file_path, output_path, max_size, split_suffix='dir', auto_remove=False, verbose=False):
+def compress_and_split(file_path, output_path, max_size, split_suffix='dir', verbose=False):
     file_size = file_path.stat().st_size
 
     if file_size <= max_size:
@@ -69,11 +69,6 @@ def compress_and_split(file_path, output_path, max_size, split_suffix='dir', aut
         shutil.copy2(file_path, output_path)
         if verbose:
             print(f"  Copied to: {output_path}")
-
-        if auto_remove:
-            file_path.unlink()
-            if verbose:
-                print(f"  Removed original file: {file_path}")
         return
 
     print(f"Processing {file_path} (size: {file_size} bytes)")
@@ -112,13 +107,8 @@ def compress_and_split(file_path, output_path, max_size, split_suffix='dir', aut
     if verbose:
         print(f"  Removed temporary zip: {zip_path}")
 
-    if auto_remove:
-        file_path.unlink()
-        if verbose:
-            print(f"  Removed original file: {file_path}")
 
-
-def recover_file(dir_path, output_path, split_suffix, max_size=None, auto_remove=False, verbose=False):
+def recover_file(dir_path, output_path, split_suffix, max_size=None, verbose=False):
     dir_name = dir_path.name
 
     expected_suffix = f'.{split_suffix}'
@@ -256,11 +246,6 @@ def recover_file(dir_path, output_path, split_suffix, max_size=None, auto_remove
     if verbose:
         print(f"  Removed temporary zip: {zip_path}")
 
-    if auto_remove:
-        shutil.rmtree(dir_path)
-        if verbose:
-            print(f"  Removed directory: {dir_path}")
-
 
 def check_for_symlinks(root_dir, verbose=False):
     """Check if there are any symlinks in the directory"""
@@ -303,7 +288,7 @@ def check_for_conflicts(root_dir, split_suffix='dir', verbose=False):
     return conflicts
 
 
-def scan_directory(input_dir, output_dir, max_size, split_suffix='dir', recover_mode=False, auto_remove=False, verbose=False):
+def scan_directory(input_dir, output_dir, max_size, split_suffix='dir', recover_mode=False, verbose=False):
     input_path = Path(input_dir)
     output_path = Path(output_dir)
 
@@ -334,7 +319,7 @@ def scan_directory(input_dir, output_dir, max_size, split_suffix='dir', recover_
                     rel_path = item.relative_to(input_path)
                     original_name = item.name[:-len(f'.{split_suffix}')]
                     output_file = output_path / rel_path.parent / original_name
-                    recover_file(item, output_file, split_suffix, max_size=max_size, auto_remove=auto_remove, verbose=verbose)
+                    recover_file(item, output_file, split_suffix, max_size=max_size, verbose=verbose)
                 except Exception as e:
                     print(f"Error recovering from {item}: {e}")
 
@@ -394,7 +379,7 @@ def scan_directory(input_dir, output_dir, max_size, split_suffix='dir', recover_
             try:
                 rel_path = item.relative_to(input_path)
                 output_file = output_path / rel_path
-                compress_and_split(item, output_file, max_size=max_size, split_suffix=split_suffix, auto_remove=auto_remove, verbose=verbose)
+                compress_and_split(item, output_file, max_size=max_size, split_suffix=split_suffix, verbose=verbose)
             except Exception as e:
                 print(f"Error processing {item}: {e}")
 
@@ -406,7 +391,6 @@ def main():
     parser.add_argument('--split-dir-suffix', default='dir', help='Suffix for split directories (default: "dir", creates filename.dir)')
     parser.add_argument('--verbose', action='store_true', help='Show logging information')
     parser.add_argument('--recover', action='store_true', help='Recover files from split directories')
-    parser.add_argument('--auto-remove', action='store_true', help='Automatically remove original files after compression and splitting')
     parser.add_argument('--max-size', type=int, help='Maximum chunk size in bytes (required for split mode, optional for recovery mode)')
     args = parser.parse_args()
 
@@ -443,19 +427,15 @@ def main():
 
     if args.recover:
         print("Mode: RECOVER")
-        if args.auto_remove:
-            print(f"Auto-remove: ENABLED, .{args.split_dir_suffix} directories will be deleted after recovery")
     else:
         print(f"Mode: COMPRESS AND SPLIT")
         print(f"Maximum file size: {args.max_size} bytes")
-        if args.auto_remove:
-            print("Auto-remove: ENABLED (original files will be deleted after splitting)")
 
     if args.verbose:
         print("Verbose: ENABLED")
 
     print("-" * 60)
-    scan_directory(args.input_dir, args.output_dir, max_size=args.max_size, split_suffix=args.split_dir_suffix, recover_mode=args.recover, auto_remove=args.auto_remove, verbose=args.verbose)
+    scan_directory(args.input_dir, args.output_dir, max_size=args.max_size, split_suffix=args.split_dir_suffix, recover_mode=args.recover, verbose=args.verbose)
     print("-" * 60)
     print("Done!")
 
